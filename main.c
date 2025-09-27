@@ -14,80 +14,12 @@
 
 #define PORT        8888
 #define RES_BUFF    65535
-#define COOKIE_NAME "session"
 
-
-struct Session {
-    struct Session *next;
-    char sid[9];
-    unsigned int rc;
-    int linuxers;
-};
-
-struct Request {
-    struct Session *session;
-    struct MHD_PostProcessor *pp;
-    const char *post_url;
-};
 
 static char *index_format_template = NULL;
 
 static int linuxers = 0;
-static struct Session *sessions;
 
-
-
-static struct Session *get_session(struct MHD_Connection *connection) {
-    struct Session *ret;
-    const char *cookie;
-
-    cookie = MHD_lookup_connection_value(connection, MHD_COOKIE_KIND,
-        COOKIE_NAME);
-    if (cookie != NULL) {
-        /* find existing session */
-        ret = sessions;
-        while (NULL != ret) {
-            if (strcmp(cookie, ret->sid) == 0)
-                break;
-            ret = ret->next;
-        }
-        if (NULL != ret) {
-            ret->rc++;
-            return ret;
-        }
-    }
-    /* create fresh session */
-    ret = malloc(sizeof (struct Session));
-    snprintf(ret->sid, 9, "%lx", random());
-    ret->sid[8] = 0;
-    ret->rc++;  
-    ret->next = sessions;
-    sessions = ret;
-    return ret;
-}
-
-static enum MHD_Result post_iterator(
-    void *cls,
-	enum MHD_ValueKind kind,
-	const char *key,
-	const char *filename,
-	const char *content_type,
-	const char *transfer_encoding,
-	const char *data, uint64_t off, size_t size
-) {
-    struct Request *request = cls;
-    struct Session *session = request->session;
-
-    printf("called %s\n", data);
-    if (strcmp("linuxers", key) == 0) {
-        printf("asdflinuxers=%s\n", data);
-        session->linuxers = atoi(data);
-        return MHD_YES;
-    }
-   
-    fprintf(stderr, "unsupported key `%s'\n", key);
-    return MHD_YES;
-}
 
 enum MHD_Result answer_to_connection(
     void *cls, struct MHD_Connection *connection,
@@ -107,26 +39,7 @@ enum MHD_Result answer_to_connection(
     printf("%s - %s %s: ", inet_ntoa((*coninfo)->sin_addr), method, url);
 
     struct MHD_Response *response;
-    struct Session *session;
-    struct Request *request = *ptr;
     int ret;
-
-    if (!request) {
-        request = malloc(sizeof(struct Request));
-        if (strcmp(method, MHD_HTTP_METHOD_POST) == 0) {
-            request->pp = MHD_create_post_processor(connection, 1024,
-                 &post_iterator, request);
-        }
-    }
-
-    if (!request->session) {
-        request->session = get_session(connection);
-        if (NULL == request->session) {
-            fprintf(stderr, "Failed to setup session for `%s'\n", url);
-            return MHD_NO; /* internal error */
-        }
-    }
-    session = request->session;
 
     if (strcmp(method, "GET") == 0 && strcmp(url, "/") == 0) {
         snprintf(buff, 65535, index_format_template, linuxers);
@@ -137,26 +50,18 @@ enum MHD_Result answer_to_connection(
         ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
         MHD_destroy_response(response);
     }
-    else if (strcmp(method, "POST") == 0 && strcmp(url, "/update") == 0) {
+    else if (strcmp(method, "GET") == 0 && strcmp(url, "/update") == 0) {
         response = MHD_create_response_from_buffer(0, (void*)NULL, 0);
-        /* evaluate POST data */
-        //MHD_post_process(request->pp, upload_data, *upload_data_size);
-        if (upload_data)
-            sscanf(upload_data, "linuxers=%d", &linuxers);
-        if (*upload_data_size) {
-            *upload_data_size = 0;
-            return MHD_YES;
-        }
+        /* evaluate data */
+        const char *str = MHD_lookup_connection_value(connection,
+            MHD_GET_ARGUMENT_KIND, "linuxers");
 
-        /* done with POST data, serve response */
-        MHD_destroy_post_processor(request->pp);
-        request->pp = NULL;
-    
+        linuxers = atoi(str);
+            
         printf("%d\n", 200);
         ret = MHD_queue_response(connection, 200, response);
         MHD_destroy_response(response);
 
-        linuxers = session->linuxers;
         printf("linuxers=%d\n", linuxers);
     } else {
         response = MHD_create_response_from_buffer(0, (void*)NULL, 0);
