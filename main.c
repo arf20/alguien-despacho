@@ -78,6 +78,7 @@ int main() {
     if (!tf) {
         fprintf(stderr, "error opening index template file: %s\n",
             strerror(errno));
+        return 1;
     }
     fseek(tf, 0, SEEK_END);
     size_t tfs = ftell(tf);
